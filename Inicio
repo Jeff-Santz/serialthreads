@@ -1,0 +1,68 @@
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/printk.h>
+
+#define A2_NODE DT_ALIAS(A2)
+#if !DT_NODE_HAS_STATUS(A2_NODE, okay)
+#error "Unsupported board: A5 devicetree alias is not defined"
+#endif
+
+#define A3_NODE DT_ALIAS(A3)
+#if !DT_NODE_HAS_STATUS(A3_NODE, okay)
+#error "Unsupported board: A3 devicetree alias is not defined"
+#endif
+
+static const struct gpio_dt_spec Envia = GPIO_DT_SPEC_GET_OR(A2_NODE, gpiob, {0});
+static const struct gpio_dt_spec Recebe = GPIO_DT_SPEC_GET_OR(A3_NODE, gpiob, {0});
+
+void Enviar(void) {
+    if (!device_is_ready(Envia.port)) {
+        printk("Error: dispositivo GPIO nao esta pronto\n");
+        return;
+    }
+
+    if (gpio_pin_configure_dt(&Envia, GPIO_OUTPUT) != 0) {
+        printk("Error: falha ao configurar o pino PTC1\n");
+        return;
+    }
+
+    while (1) {
+        gpio_pin_set_dt(&Envia, 1);
+        printk("Transmitindo valor 1\n");
+        k_msleep(500);
+
+        gpio_pin_set_dt(&Envia, 0);
+        printk("Transmitindo valor 0\n");
+        k_msleep(500);
+    }
+}
+
+void Receber(void) {
+    if (!device_is_ready(Recebe.port)) {
+        printk("Error: dispositivo GPIO não está pronto\n");
+        return;
+    }
+
+    if (gpio_pin_configure_dt(&Recebe, GPIO_INPUT) != 0) {
+        printk("Error: falha ao configurar o pino PTC1\n");
+        return;
+    }
+
+    while (1) {
+        int valor = gpio_pin_get_dt(&Recebe);
+        if (valor < 0) {
+            printk("Erro\n");
+        } else {
+            printk("Valor recebido: %d\n", valor);
+        }
+        k_msleep(500);
+    }
+}
+
+int main() {
+    printk("Iniciando transmissao no TX\n");
+    Enviar(); 
+    Receber();
+    return 0;
+}
