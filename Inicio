@@ -2,67 +2,142 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/sys/__assert.h>
+#include <string.h>
 
-#define A2_NODE DT_ALIAS(A2)
-#if !DT_NODE_HAS_STATUS(A2_NODE, okay)
-#error "Unsupported board: A5 devicetree alias is not defined"
-#endif
+int i, n=7, b, aux = 0, e=0, f=0, j=0, k=1, m, p=0, l=0, ordem;
+char u=0b01010101, sync = 0b01100110, Startx=0b00000010, id = 0b01110001, data=0b01100001, Endtx=0b00000011;
+char transmitir=0b00000000, receber=0b00000000, ndados = 0b00000000;
+char saveU=0b01010101, saveS = 0b01100110, saveSt=0b00000010, saveI = 0b01110001, saveD = 0b01100001, savend=0b00000011;
 
-#define A3_NODE DT_ALIAS(A3)
-#if !DT_NODE_HAS_STATUS(A3_NODE, okay)
-#error "Unsupported board: A3 devicetree alias is not defined"
-#endif
 
-static const struct gpio_dt_spec Envia = GPIO_DT_SPEC_GET_OR(A2_NODE, gpiob, {0});
-static const struct gpio_dt_spec Recebe = GPIO_DT_SPEC_GET_OR(A3_NODE, gpiob, {0});
+const struct device * stx = DEVICE_DT_GET(DT_NODELABEL(gpiob));
+K_MUTEX_DEFINE (PodeTransmitir);
+K_MUTEX_DEFINE (TransmitiuCerto);
+K_FIFO_DEFINE (FifoTX);
+K_FIFO_DEFINE (FifoRX);
+struct k_timer timer;
 
-void Enviar(void) {
-    if (!device_is_ready(Envia.port)) {
-        printk("Error: dispositivo GPIO nao esta pronto\n");
+
+void Enviar () {
+    if (k_mutex_lock(&PodeTransmitir, K_FOREVER)==0) {
+        ordem=1;
+    }
+    else {
+        k_mutex_unlock(&PodeTransmitir);
         return;
     }
+    
+    //Se não tem ninguém transmitindo, inicia a transmissão
 
-    if (gpio_pin_configure_dt(&Envia, GPIO_OUTPUT) != 0) {
-        printk("Error: falha ao configurar o pino PTC1\n");
-        return;
-    }
-
+    //Ordem 1, transferindo u
     while (1) {
-        gpio_pin_set_dt(&Envia, 1);
-        printk("Transmitindo valor 1\n");
-        k_msleep(500);
-
-        gpio_pin_set_dt(&Envia, 0);
-        printk("Transmitindo valor 0\n");
-        k_msleep(500);
-    }
-}
-
-void Receber(void) {
-    if (!device_is_ready(Recebe.port)) {
-        printk("Error: dispositivo GPIO não está pronto\n");
-        return;
-    }
-
-    if (gpio_pin_configure_dt(&Recebe, GPIO_INPUT) != 0) {
-        printk("Error: falha ao configurar o pino PTC1\n");
-        return;
-    }
-
-    while (1) {
-        int valor = gpio_pin_get_dt(&Recebe);
-        if (valor < 0) {
-            printk("Erro\n");
-        } else {
-            printk("Valor recebido: %d\n", valor);
+        if (ordem == 1) {
+        gpio_pin_set (stx, 0x0, (u&0b10000000)>>7);
+        printk ("%d\n", (u&0b10000000)>>7);
+        u=u<<1;
+        i++;
+        if (i==n) {
+            printk ("U recebido!\n\n");
+            ordem=2;
+            i=0;
+            u=saveU;
         }
-        k_msleep(500);
     }
+
+    if (ordem == 2) {
+        gpio_pin_set (stx, 0x0, (sync&0b10000000)>>7);
+        printk ("%d\n", (sync&0b10000000)>>7);
+        sync=sync<<1;
+        i++;
+        if (i==n) {
+            printk ("Sync recebido!\n\n");
+            ordem=3;
+            i=0;
+            sync=saveS;
+        }
+    }
+
+    if (ordem == 3) {
+        gpio_pin_set (stx, 0x0, (Startx&0b10000000)>>7);
+        printk ("%d\n", (Startx&0b10000000)>>7);
+        Startx=Startx<<1;
+        i++;
+        if (i==n) {
+            printk ("Start Of Transmission!\n\n");
+            ordem=4;
+            i=0;
+            Startx=saveSt;
+        }
+    }
+
+    if (ordem == 4) {
+        gpio_pin_set (stx, 0x0, (id&0b10000000)>>7);
+        printk ("%d\n", (id&0b10000000)>>7);
+        id=id<<1;
+        i++;
+        if (i==4) {
+            printk ("ID Recebido!\n");
+            ordem=5;
+            i=0;
+            ndados=(id&0b10000000)|ndados;
+            id=id<<1;
+            ndados=(id&0b10000000)|ndados;
+            id=id<<1;
+            ndados=(id&0b10000000)|ndados;
+            id=id<<1;
+
+            ndados = ndados>>5;
+
+            //Pegando a quantidade de dados
+            aux = ndados&0b00000111;
+            printk ("Quantidade de dados: %d\n\n", aux);
+
+            id=saveI;
+        }
+    }
+
+    if (ordem == 5) {
+        gpio_pin_set (stx, 0x0, (data&0b10000000)>>7);
+        printk ("%d\n", (data&0b10000000)>>7);
+        data=data<<1;
+        i++;
+        if (i==aux) {
+            printf ("Dados Recebidos!\n\n");
+            ordem=6;
+            i=0;
+            data=saveD;
+        }
+    }
+
+    if (ordem == 6) {
+        gpio_pin_set (stx, 0x0, (Endtx&0b10000000)>>7);
+        printk ("%d\n", (Endtx&0b10000000)>>7);
+        Endtx=Endtx<<1;
+        i++;
+        if (i==n) {
+            ordem=7;
+            i=0;
+            Endtx=savend;
+        }
+    }
+
+    if (ordem == 7) {
+        printk ("Acabou\n");
+        k_mutex_unlock(&PodeTransmitir);
+        ordem=0;
+    }
+    k_msleep(10);
+    }
+
 }
 
-int main() {
-    printk("Iniciando transmissao no TX\n");
-    Enviar(); 
-    Receber();
+int main(){
+    Enviar();
+    // k_timer_init(&timer, Enviar, NULL);
+    // k_timer_start(&timer, K_MSEC(0), K_MSEC(10));
+    while (1) {
+  
+    }
     return 0;
 }
