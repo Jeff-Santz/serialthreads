@@ -4,11 +4,14 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/__assert.h>
+#include <zephyr/random/random.h>
 #include <string.h>
 
 int i, n=9, ordem, num_chars;
+int tempo_incremento = 0, tempo_total=0, tempo_espera=10;
 char u = 0b01010101, sync = 0b01100110, Start = 0b00000010, id = 0b10011000, Endtx=0b00000011;
 char saveu=0b01010101, saveS = 0b01100110, saveStx=0b00000010, saveI = 0b10011000, saveEtx = 0b00000011;
+char testu, testS, testStx, testId, testdata[100], testEtx;
 char data[7];
 
 bool Transmitindo = false;
@@ -125,7 +128,7 @@ void Tx (void) {
                     k_msleep(10);
                     //printk("%d", bit2);
                 }
-                printk("\nDados: \n");
+                //printk("\nDados: \n");
                 for (int j = 0; caractere[j] != '\0'; j++) {
                     for (int k = 7; k >= 0; k--) {
                         int bit1 = (caractere[j] >> k) & 0b00000001;
@@ -135,6 +138,7 @@ void Tx (void) {
                     }
                     printk("\n");
                 }
+                id=saveI;
                 ordem = 5;
                 i = 0;
                 }
@@ -154,24 +158,25 @@ void Tx (void) {
         }
 
         if (ordem == 6) {
-            printk ("Acabou\n");
+            //printk ("Acabou\n");
+            k_msleep(10);
+            gpio_pin_set (stx, 0x0, 1);
             k_mutex_unlock(&PodeTransmitir);
-            ordem=1;
-            Transmitindo = false;
         }
         k_msleep(10);
     }
 }
 
 
-
+char tx_buf[MSG_SIZE];
 
 int main(void) {
-    char tx_buf[MSG_SIZE];
     caractere[MSG_SIZE - 1] = '\0';
 
     uart_irq_callback_user_data_set(uart_dev, serial_cb, NULL);
     uart_irq_rx_enable(uart_dev);
+
+    printk ("\n");
 
     while (1) {  
         if (k_msgq_get(&uart_msgq, &tx_buf, K_FOREVER) == 0) {
@@ -189,57 +194,82 @@ int main(void) {
 }
 
 char palavra;
-char dumb;
-int z=0;
+char dumb, nc;
+int z=0, v=0;
 
-void Rx () {
+bool verificar_dados() {
+    return (testu == saveu) &&
+           (testS == saveS) &&
+           (testStx == saveStx) &&
+           (testId == saveI) &&
+           (memcmp(testdata, caractere, sizeof(testdata)) == 0) &&
+           (testEtx == saveEtx);
+}
+
+void Rx() {
     gpio_pin_configure(stx, 0x1, GPIO_INPUT);
-    
     while (1) {
         dumb = (dumb << 1) | gpio_pin_get(stx, 0x1);
-        if (Transmitindo) {
-            if (ordem == 2 && dumb==saveS) {
-                printk ("\n\nSincronizacao recebida!\n");
-                z++;
+
+        if (ordem == 2 && dumb == saveS) {
+            testS = dumb;
+            printk("\nSincronizacao recebida!\n");
+            z++;
+        }
+        if (ordem == 3 && dumb == saveStx) {
+            testStx = dumb;
+            printk("\nInício da Transmissao!\n");
+            z++;
+        }
+        if (ordem == 4) {
+            printk ("\nID:");
+            for (int t=0;t<5;t++) {
+                printk ("%d", gpio_pin_get (stx, 0x1));
+                k_msleep (10);
             }
-            if (ordem==3 && dumb==saveStx) {
-                printk ("\nComeço de transmissão:\n");
-                z++;
+            for (int w=0;w<3;w++) {
+                k_msleep (10);
             }
-            if (ordem==4)  {
-                printk ("\nID:");
-                for (int t=0;t<5;t++) {
-                    printk ("%d", gpio_pin_get (stx, 0x1));
-                    k_msleep (10);
+            v=dumb&0b00000111;
+            testId=dumb&0b11111000;
+            printk("\nQuantidade de caracteres: %d\n", v);
+            printk ("\nMensagem:\n");
+
+            for (int s = 0; s < v; s++) {
+                for (int q = 0; q < 8; q++) {
+                    palavra = (palavra << 1) | gpio_pin_get(stx, 0x1);
+                    k_msleep(10);
                 }
-                printk("\nQuantidade de caracteres: %d\n", num_chars);
-                printk ("\nMensagem: ");
-                for (int s=0;s<sizeof(caractere)+1;s++) {
-                    for (int q=0;q<8;q++) {
-                        palavra = (palavra<<1) |gpio_pin_get (stx, 0x1);
-                        k_msleep (10);
-                    }
-                    printk ("%c", palavra);
-                }
-                z++;
+                testdata[s] = palavra;
+                printk("%c", palavra);
             }
-            if (ordem==5 && dumb==saveEtx) {
-                printk ("\n\nETX recebido!\n");
-                z++;
+            z++;
+        }
+        if (ordem == 5 && dumb == saveEtx) {
+            testEtx = dumb;
+            printk("\nETX recebido!\n");
+            z++;
+        }
+
+        if (ordem == 6) {
+            if (verificar_dados()) {
+                printk("\nTransmissao Bem-sucedida!\n");
+                ordem = 0;
+                Transmitindo = true;
+            } else {
+                printk("\nErro na Transmissao!\n");
+                ordem = 0;
+                Transmitindo = false;
+                caractere[MSG_SIZE - 1] = '\0';
+                strncpy(caractere, tx_buf, MSG_SIZE);
+                Tx();
             }
-            printk ("%d", (dumb&0b00000001));
         }
-        if (z!=4 && ordem==6) {
-            printk ("\n\nTransmissão Fracassada\n\n");
-            Transmitindo = true;
-        }
-        else if (z==4 && ordem==6) {
-            printk ("\n\nTransmissão Bem sucedida\n\n");
-            Transmitindo=false;
-        }
-        k_msleep (10);
+        k_msleep(10);
     }
 }
 
+
 K_THREAD_DEFINE(Rx_id, 1024, Rx, NULL, NULL, NULL,
 		0, 0, 0);
+
