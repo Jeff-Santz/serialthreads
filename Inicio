@@ -17,6 +17,13 @@ uint8_t num_chars;  // Variável não assinada de 8 bits
 
 bool Transmitindo = false;
 
+struct k_timer timer;
+extern void my_expiry_function(Rx);
+
+struct k_timer timer1;
+extern void my_expiry_function(filtro);
+
+
 
 #define UART_DEVICE_NODE DT_CHOSEN(zephyr_shell_uart)
 
@@ -174,6 +181,11 @@ int main(void) {
 
     uart_irq_callback_user_data_set(uart_dev, serial_cb, NULL);
     uart_irq_rx_enable(uart_dev);
+    k_timer_init(&timer, Rx, NULL);
+    k_timer_init(&timer1, filtro, NULL);
+
+    k_timer_start (&timer, 0, K_USEC(250));
+    k_timer_start (&timer1, 0, K_MSEC(10));
 
     printk ("\n");
 
@@ -207,15 +219,11 @@ bool verificar_dados() {
 
 void Rx() {
     gpio_pin_configure(stx, 0x1, GPIO_INPUT);
-    while (1) {
         dumb0 = (dumb0<<1) | gpio_pin_get (stx, 0x1);
-        k_usleep(250);
-    }
 }
 
 void filtro() {
-    while (1) {
-        k_msleep(10);
+
         dumb1=dumb0&0b00000011;
         if (dumb1==3) {
             dumb=(dumb<<1)|1;
@@ -229,7 +237,6 @@ void filtro() {
             ordem = 1;
             Transmitindo = false;
         }
-    }
 }
 
 void AnaliseDados() {
