@@ -265,21 +265,22 @@ void AnaliseDados() {
             if (z == 5 && ji == 1) {
                 printk("\nInconsistencia no recebimento de dados!\n");
                 strncpy(caractere, tx_buf, MSG_SIZE);
-                Transmitindo = false;
                 z=0;
                 ji=0;
+                ordem = 1;
                 //Tx();
             }
             else if (z ==  5 && ji == 0) {
                 printk ("\nTudo foi recebido corretamente!\n");
                 z=0;
                 Transmitindo = false;
+                ordem = 0;
             }
             else {
                 printk ("Erro, houve algum erro no envio de dados!");
                 z=0;
                 ji=0;
-                Transmitindo = false;
+                ordem = 1;
             }
         }
 
